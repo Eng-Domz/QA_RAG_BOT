@@ -1,0 +1,30 @@
+﻿# Secrets / environment
+.env
+.env.*
+env.sample
+
+# Local vector DB / generated data
+chroma_db/
+
+# Exclude local explanation docs
+Explanation/
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

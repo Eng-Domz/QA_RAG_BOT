@@ -1,0 +1,33 @@
+# Core dependencies - specific compatible versions
+langchain==0.1.20
+langchain-core==0.1.52
+langchain-community==0.0.38
+langchain-chroma==0.1.1
+langchain-text-splitters==0.0.2
+
+# Vector store
+chromadb==0.4.24
+
+# Embeddings
+sentence-transformers==2.7.0
+
+# LLM integrations
+langchain-openai==0.1.7
+openai==1.30.1
+
+# Document loaders
+pypdf==4.2.0
+python-docx==1.1.2
+docx2txt==0.8
+
+# Utilities
+python-dotenv==1.0.1
+tiktoken==0.7.0
+pydantic==2.7.1
+
+# ML dependencies (torch with CUDA support for GPU acceleration)
+# For NVIDIA GPU: pip install torch --index-url https://download.pytorch.org/whl/cu118
+# For CPU only (default): pip install torch
+transformers==4.41.0
+torch==2.3.0
+numpy==1.26.4

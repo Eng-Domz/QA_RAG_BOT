@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip list:*)",
+      "Bash(python -c \"import sys; print\\(sys.version\\)\")",
+      "Bash(ollama list:*)",
+      "Bash(python -c \"import langchain; print\\(langchain.__version__\\)\")"
+    ]
+  }
+}

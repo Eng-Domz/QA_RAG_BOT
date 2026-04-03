@@ -1,0 +1,30 @@
+What is machine learning?
+What are the main types of machine learning?
+What is supervised learning?
+What is unsupervised learning?
+What is reinforcement learning?
+What is overfitting?
+What is underfitting?
+What is feature engineering?
+What are some popular machine learning algorithms?
+What is the difference between classification and regression?
+What is deep learning and how does it differ from traditional machine learning?
+What is a perceptron and how does it work?
+Explain the architecture of a multi-layer perceptron (MLP).
+What are activation functions and why are they important?
+Compare sigmoid, tanh, and ReLU activation functions.
+What is the vanishing gradient problem?
+Explain forward propagation and backpropagation.
+What is the role of loss functions in neural network training?
+Describe the difference between MSE and cross-entropy loss.
+How does gradient descent work?
+What is the Adam optimizer and why is it popular?
+What is dropout and how does it prevent overfitting?
+Explain batch normalization and its benefits.
+What are convolutional neural networks (CNNs) used for?
+Describe the components of a CNN architecture.
+What are recurrent neural networks (RNNs) and when are they used?
+Explain LSTM and how it solves the vanishing gradient problem.
+What is the transformer architecture and why is it revolutionary?
+Describe the self-attention mechanism in transformers.
+What is transfer learning and why is it useful?
