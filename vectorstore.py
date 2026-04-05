@@ -18,6 +18,7 @@ from config import (
     SIMILARITY_THRESHOLD,
     GPU_DEVICE,
     DIRECTML_ADAPTER_PREFERENCE,
+    FALLBACK_TO_TOP_K_IF_BELOW_THRESHOLD,
 )
 
 
@@ -135,7 +136,13 @@ class VectorStoreManager:
         print("Vector store ready!")
         return self.vectorstore
 
-    def similarity_search(self, query: str, k: int = TOP_K) -> List[Document]:
+    def similarity_search(
+        self,
+        query: str,
+        k: int = TOP_K,
+        similarity_threshold: Optional[float] = None,
+        fallback_to_top_k: Optional[bool] = None,
+    ) -> List[Document]:
         """
         Search for similar documents to the query.
         Returns results even if below threshold to ensure we always have context.
@@ -150,14 +157,17 @@ class VectorStoreManager:
 
         # Filter by similarity threshold but always return at least the top result
         # This ensures the LLM always has some context to work with
-        filtered_results = [
-            doc for doc, score in results
-            if score >= SIMILARITY_THRESHOLD
-        ]
+        threshold = SIMILARITY_THRESHOLD if similarity_threshold is None else similarity_threshold
+        allow_fallback = (
+            FALLBACK_TO_TOP_K_IF_BELOW_THRESHOLD
+            if fallback_to_top_k is None
+            else fallback_to_top_k
+        )
+        filtered_results = [doc for doc, score in results if score >= threshold]
 
         # If no results above threshold, return top k results anyway
         # Let LLM decide what's relevant when context is scarce
-        if not filtered_results:
+        if not filtered_results and allow_fallback:
             return [doc for doc, score in results]
 
         return filtered_results

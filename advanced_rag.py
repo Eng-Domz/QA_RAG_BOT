@@ -2,10 +2,15 @@
 Advanced RAG techniques for better performance.
 Includes re-ranking and hybrid search options.
 """
-from typing import List, Tuple
+from typing import List
 from langchain_core.documents import Document
 from langchain_community.retrievers import BM25Retriever
-from langchain_community.retrievers import EnsembleRetriever
+
+# EnsembleRetriever moved between packages across LangChain versions.
+try:
+    from langchain.retrievers import EnsembleRetriever
+except ImportError:
+    from langchain_community.retrievers import EnsembleRetriever
 
 from vectorstore import VectorStoreManager
 from config import TOP_K
@@ -61,7 +66,7 @@ class AdvancedRetriever:
         print("Hybrid search (BM25 + Semantic) configured")
         return self
 
-    def retrieve(self, query: str, method: str = "standard") -> List[Document]:
+    def retrieve(self, query: str, method: str = "standard", k: int = TOP_K) -> List[Document]:
         """
         Retrieve documents using the specified method.
 
@@ -70,9 +75,10 @@ class AdvancedRetriever:
             method: "standard" or "hybrid"
         """
         if method == "hybrid" and self.ensemble_retriever:
-            return self.ensemble_retriever.invoke(query)
+            docs = self.ensemble_retriever.invoke(query)
+            return docs[:k]
         else:
-            return self.vectorstore_manager.similarity_search(query)
+            return self.vectorstore_manager.similarity_search(query, k=k)
 
 
 class QueryExpansion:
@@ -115,7 +121,16 @@ Question: {query}
                     line = line.split(".", 1)[1].strip()
                 if line and len(line) > 5:  # Avoid very short fragments
                     variants.append(line)
-            return variants[:4]  # Limit to 4 variants max
+            # Preserve order while removing duplicates
+            deduped = []
+            seen = set()
+            for variant in variants:
+                key = variant.lower().strip()
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                deduped.append(variant.strip())
+            return deduped[:4]  # Limit to 4 variants max
         except Exception:
             # Fallback to simple variants
             return [query, query.lower()]

@@ -35,6 +35,7 @@ A production-ready Question Answering system using **Retrieval-Augmented Generat
 - **GPU Acceleration** - CUDA, DirectML, MPS support for embedding generation
 - **Query Expansion** - Automatic query rephrasing for better retrieval
 - **HyDE** - Hypothetical Document Embeddings for improved accuracy
+- **Strict Grounding Mode** - Force context-only answers for lower hallucination risk
 - **Source Attribution** - Track which documents contributed to answers
 - **Debug Mode** - Inspect retrieved documents and relevance scores
 - **Batch Processing** - Evaluate multiple questions and export results
@@ -79,8 +80,7 @@ source venv/bin/activate  # Mac/Linux
 pip install -r requirements.txt
 
 # 3. Configure (Ollama - no API key needed)
-copy .env.example .env  # Windows
-cp .env.example .env    # Mac/Linux
+# Edit .env with your preferred settings
 
 # 4. Add documents to ./documents folder
 
@@ -141,11 +141,7 @@ python setup.py
 
 ## Configuration
 
-Copy the example environment file and customize:
-
-```bash
-cp .env.example .env
-```
+Edit `.env` and customize values for your setup.
 
 ### Environment Variables
 
@@ -163,6 +159,14 @@ cp .env.example .env
 | `CHUNK_SIZE` | `1000` | Characters per chunk |
 | `CHUNK_OVERLAP` | `200` | Overlap between chunks |
 | `TOP_K` | `5` | Number of documents to retrieve |
+| `SIMILARITY_THRESHOLD` | `0.3` | Minimum relevance score to keep a chunk |
+| `RETRIEVAL_MODE` | `standard` | `standard` or `hybrid` retrieval |
+| `HYBRID_WEIGHTS` | `0.5,0.5` | Weights for semantic and BM25 retrievers |
+| `ENABLE_QUERY_EXPANSION` | `false` | Enable multi-query expansion |
+| `ENABLE_HYDE` | `false` | Enable HyDE hypothetical query generation |
+| `MAX_QUERY_VARIANTS` | `4` | Maximum query variants used per question |
+| `STRICT_GROUNDING` | `false` | If true, answer only from retrieved context |
+| `FALLBACK_TO_TOP_K_IF_BELOW_THRESHOLD` | `true` | Return top-k if threshold filtered all results |
 
 ---
 
@@ -242,7 +246,7 @@ claude_proj_1/
 ├── setup.py               # Setup validation script
 ├── requirements.txt       # Python dependencies
 ├── .env                   # Environment configuration
-├── .env.example           # Example configuration
+├── .env                   # Environment configuration
 ├── documents/             # Place your documents here
 │   ├── sample_document.txt
 │   └── deep_learning_lecture.txt
@@ -313,6 +317,8 @@ docs = retriever.retrieve("your query", method="hybrid")
 
 **Best for:** Technical terms, product codes, exact match requirements
 
+**Live integration:** Set `RETRIEVAL_MODE=hybrid` in `.env` to use hybrid retrieval in `QABot.ask()`.
+
 ### Query Expansion
 
 Generate multiple query variants for better coverage:
@@ -326,6 +332,8 @@ variants = QueryExpansion.generate_variants("what is ML?", llm)
 
 **Best for:** Vocabulary mismatch, improving recall
 
+**Live integration:** Set `ENABLE_QUERY_EXPANSION=true` to automatically expand each user question into multiple query variants before retrieval.
+
 ### HyDE (Hypothetical Document Embeddings)
 
 Generate a hypothetical answer, then search for similar content:
@@ -337,6 +345,18 @@ hypothetical = QueryExpansion.hyde_generate("what is overfitting?", llm)
 ```
 
 **Best for:** Questions structurally different from document content
+
+**Live integration:** Set `ENABLE_HYDE=true` to include a HyDE-generated hypothetical passage as an additional retrieval query.
+
+### Strict Grounding
+
+To reduce hallucinations, force the assistant to answer only from retrieved context:
+
+```env
+STRICT_GROUNDING=true
+SIMILARITY_THRESHOLD=0.35
+FALLBACK_TO_TOP_K_IF_BELOW_THRESHOLD=false
+```
 
 ---
 

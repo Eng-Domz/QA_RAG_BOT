@@ -2,10 +2,9 @@
 Question Answering Chain implementation.
 Connects retriever with LLM for RAG-based answers.
 """
-from typing import List, Dict, Any
+from typing import Dict, Any, List, Set, Tuple
 
 from langchain_core.prompts import PromptTemplate
-from langchain_core.documents import Document
 from langchain_community.llms.ollama import Ollama
 from langchain_openai import ChatOpenAI
 
@@ -17,7 +16,17 @@ from config import (
     OLLAMA_BASE_URL,
     OLLAMA_MODEL,
     USE_GPU,
+    TOP_K,
+    SIMILARITY_THRESHOLD,
+    RETRIEVAL_MODE,
+    HYBRID_WEIGHTS,
+    ENABLE_QUERY_EXPANSION,
+    ENABLE_HYDE,
+    MAX_QUERY_VARIANTS,
+    STRICT_GROUNDING,
+    FALLBACK_TO_TOP_K_IF_BELOW_THRESHOLD,
 )
+from advanced_rag import AdvancedRetriever, QueryExpansion
 from vectorstore import VectorStoreManager
 
 
@@ -44,6 +53,26 @@ RAG_PROMPT = PromptTemplate(
     input_variables=["context", "question"],
 )
 
+STRICT_RAG_PROMPT_TEMPLATE = """You are a retrieval-grounded assistant.
+
+Instructions:
+1. Answer ONLY using the context below.
+2. If context is insufficient, explicitly say you don't have enough grounded information.
+3. Do NOT use external or general knowledge.
+4. Provide a concise answer and cite source file names when possible.
+
+Context from documents:
+{context}
+
+Question: {question}
+
+Grounded answer:"""
+
+STRICT_RAG_PROMPT = PromptTemplate(
+    template=STRICT_RAG_PROMPT_TEMPLATE,
+    input_variables=["context", "question"],
+)
+
 
 class QABot:
     """
@@ -59,6 +88,8 @@ class QABot:
         self.vectorstore_manager = vectorstore_manager
         self.llm = self._initialize_llm(use_openai, use_ollama)
         self.qa_chain = None
+        self.retrieval_mode = RETRIEVAL_MODE if RETRIEVAL_MODE in {"standard", "hybrid"} else "standard"
+        self.advanced_retriever = AdvancedRetriever(vectorstore_manager)
 
     def _initialize_llm(self, use_openai: bool, use_ollama: bool):
         """
@@ -93,10 +124,82 @@ class QABot:
         if not self.vectorstore_manager.vectorstore:
             raise RuntimeError("Vector store not initialized")
 
+        if self.retrieval_mode == "hybrid":
+            self.advanced_retriever.setup_hybrid_search(weights=HYBRID_WEIGHTS)
+            print(f"Retrieval mode: hybrid (weights={HYBRID_WEIGHTS})")
+        else:
+            print("Retrieval mode: standard")
+
         self.qa_chain = True
 
         print("QA Chain initialized!")
         return self
+
+    def _build_query_set(self, question: str) -> List[str]:
+        """
+        Build query set from original question + optional expansion/HyDE.
+        """
+        queries: List[str] = [question]
+
+        if ENABLE_QUERY_EXPANSION:
+            queries.extend(QueryExpansion.generate_variants(question, llm=self.llm))
+
+        if ENABLE_HYDE:
+            queries.append(QueryExpansion.hyde_generate(question, self.llm))
+
+        deduped: List[str] = []
+        seen: Set[str] = set()
+        for q in queries:
+            cleaned = (q or "").strip()
+            if not cleaned:
+                continue
+            key = cleaned.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(cleaned)
+
+        return deduped[:max(1, MAX_QUERY_VARIANTS)]
+
+    @staticmethod
+    def _doc_key(doc) -> Tuple[str, Any, str]:
+        source = doc.metadata.get("source_file", "unknown")
+        chunk_index = doc.metadata.get("chunk_index", -1)
+        content_head = doc.page_content[:120]
+        return (source, chunk_index, content_head)
+
+    def _retrieve_documents(self, question: str) -> Tuple[List, int]:
+        """
+        Retrieve context documents using configured retrieval strategy.
+        """
+        queries = self._build_query_set(question)
+        all_docs = []
+
+        for query in queries:
+            if self.retrieval_mode == "hybrid" and self.advanced_retriever.ensemble_retriever:
+                docs = self.advanced_retriever.retrieve(query, method="hybrid")
+            else:
+                docs = self.vectorstore_manager.similarity_search(
+                    query,
+                    k=TOP_K,
+                    similarity_threshold=SIMILARITY_THRESHOLD,
+                    fallback_to_top_k=(
+                        FALLBACK_TO_TOP_K_IF_BELOW_THRESHOLD and not STRICT_GROUNDING
+                    ),
+                )
+            all_docs.extend(docs)
+
+        deduped_docs = []
+        seen_keys = set()
+        for doc in all_docs:
+            key = self._doc_key(doc)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            deduped_docs.append(doc)
+
+        # Keep context bounded to reduce token cost.
+        return deduped_docs[:TOP_K], len(queries)
 
     def ask(self, question: str) -> Dict[str, Any]:
         """
@@ -106,16 +209,31 @@ class QABot:
             raise RuntimeError("QA Chain not initialized. Call initialize_chain() first.")
 
         try:
-            retrieved_docs = self.vectorstore_manager.similarity_search(question)
+            retrieved_docs, query_count = self._retrieve_documents(question)
 
             if retrieved_docs:
                 context = "\n\n".join(doc.page_content for doc in retrieved_docs)
-                context_info = f"Retrieved {len(retrieved_docs)} document chunk(s)"
+                context_info = (
+                    f"Retrieved {len(retrieved_docs)} chunk(s) using "
+                    f"{self.retrieval_mode} retrieval over {query_count} query variant(s)"
+                )
             else:
                 context = ""
                 context_info = "No relevant documents found"
 
-            prompt = RAG_PROMPT.format(context=context, question=question)
+            if STRICT_GROUNDING and not retrieved_docs:
+                return {
+                    "question": question,
+                    "answer": (
+                        "I do not have enough grounded context in the indexed documents "
+                        "to answer this reliably."
+                    ),
+                    "context_info": context_info,
+                    "sources": [],
+                }
+
+            prompt_template = STRICT_RAG_PROMPT if STRICT_GROUNDING else RAG_PROMPT
+            prompt = prompt_template.format(context=context, question=question)
             llm_response = self.llm.invoke(prompt)
             answer = llm_response.content if hasattr(llm_response, "content") else str(llm_response)
 
@@ -147,6 +265,7 @@ class QABot:
 
         print(f"\n{'='*60}")
         print(f"DEBUG: Retrieval for question: '{question}'")
+        print(f"Mode: {self.retrieval_mode} | strict_grounding={STRICT_GROUNDING}")
         print(f"{'='*60}\n")
 
         for i, (doc, score) in enumerate(results, 1):
