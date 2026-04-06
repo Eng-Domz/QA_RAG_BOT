@@ -70,7 +70,7 @@ A production-ready Question Answering system using **Retrieval-Augmented Generat
 
 ```bash
 # 1. Clone and setup
-git clone <your-repo-url>
+git clone (https://github.com/Eng-Domz-Machine-Learning/QA_RAG_BOT)
 cd claude_proj_1
 python -m venv venv
 venv\Scripts\activate  # Windows
@@ -101,7 +101,7 @@ python main.py
 ### Step 1: Clone Repository
 
 ```bash
-git clone <your-repo-url>
+git clone (https://github.com/Eng-Domz-Machine-Learning/QA_RAG_BOT)
 cd claude_proj_1
 ```
 
