@@ -45,7 +45,12 @@ class BatchProcessor:
             results.append({
                 "question": question,
                 "answer": result["answer"],
-                "sources": [s["metadata"].get("source_file", "Unknown") for s in result["sources"]],
+                "sources": [
+                    source["metadata"].get(
+                        "source_path", source["metadata"].get("source_file", "Unknown")
+                    )
+                    for source in result["sources"]
+                ],
                 "timestamp": datetime.now().isoformat(),
             })
 
@@ -82,7 +87,7 @@ if __name__ == "__main__":
     store = VectorStoreManager()
     store.create_or_load(documents)
 
-    bot = QABot(store, use_openai=True)
+    bot = QABot(store, use_openai=False, use_ollama=True)
     bot.initialize_chain()
 
     # Example batch questions

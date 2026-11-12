@@ -1,356 +1,159 @@
-# Advanced RAG Question Answering System
+# QA RAG Bot
 
-A production-ready Question Answering system using **Retrieval-Augmented Generation (RAG)** architecture. Built with LangChain, ChromaDB, and supporting both OpenAI and local Ollama LLMs.
+An independently designed retrieval-augmented generation learning system for
+querying lecture materials with local or hosted language models. The project
+explores persistent vector search, source attribution, grounding controls,
+hybrid retrieval, query expansion, HyDE, and provider-backed evaluation.
 
-![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)
-![License](https://img.shields.io/badge/License-MIT-green.svg)
-![LLM](https://img.shields.io/badge/LLM-OpenAI%20%7C%20Ollama-orange)
+The current release is a local command-line application being hardened toward
+a production-grade bilingual knowledge platform. See [Current limitations](#current-limitations)
+for the features it does not yet claim to provide.
 
----
+## What it demonstrates
 
-## Table of Contents
+- Loading PDF, TXT, Markdown, and DOCX documents.
+- Repeatable chunking with stable source paths, file hashes, and chunk IDs.
+- Idempotent synchronization of added, changed, unchanged, and deleted sources.
+- Semantic retrieval with normalized Hugging Face embeddings and Chroma.
+- Optional BM25 plus semantic hybrid retrieval.
+- Local generation with Ollama or hosted generation with OpenAI.
+- Optional strict grounding, query expansion, HyDE, and source attribution.
+- Deterministic automated tests that do not need a model or API key.
+- A separate provider-backed manual evaluation command.
 
-- [Features](#features)
-- [Architecture Overview](#architecture-overview)
-- [Quick Start](#quick-start)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Usage](#usage)
-- [Project Structure](#project-structure)
-- [How It Works](#how-it-works)
-- [Advanced Features](#advanced-features)
-- [GPU Acceleration](#gpu-acceleration)
-- [Testing & Evaluation](#testing--evaluation)
-- [Troubleshooting](#troubleshooting)
-- [Best Practices](#best-practices)
-- [License](#license)
+## Architecture
 
----
-
-## Features
-
-- **Multi-Format Document Support** - PDF, TXT, Markdown, Word documents
-- **Hybrid Search** - Combine semantic (vector) + lexical (BM25) retrieval
-- **Flexible LLM Options** - OpenAI (cloud) or Ollama (local, free)
-- **GPU Acceleration** - CUDA, DirectML, MPS support for embedding generation
-- **Query Expansion** - Automatic query rephrasing for better retrieval
-- **HyDE** - Hypothetical Document Embeddings for improved accuracy
-- **Strict Grounding Mode** - Force context-only answers for lower hallucination risk
-- **Source Attribution** - Track which documents contributed to answers
-- **Debug Mode** - Inspect retrieved documents and relevance scores
-- **Batch Processing** - Evaluate multiple questions and export results
-
----
-
-## Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        RAG Pipeline                              │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐  │
-│  │ Documents│───▶│  Chunk   │───▶│ Embedding│───▶│ Vector   │  │
-│  │  (PDF,   │    │ Splitter │    │  Model   │    │  Store   │  │
-│  │  TXT)    │    │          │    │          │    │ (Chroma) │  │
-│  └──────────┘    └──────────┘    └──────────┘    └────┬─────┘  │
-│                                                       │        │
-│  ┌──────────┐    ┌──────────┐    ┌──────────┐         │        │
-│  │  Answer  │◀───│   LLM    │◀───│  Context │◀────────┘        │
-│  │          │    │(OpenAI/  │    │Retrieval │                  │
-│  │          │    │ Ollama)  │    │          │                  │
-│  └──────────┘    └──────────┘    └──────────┘                  │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+```text
+documents/
+    |
+    v
+DocumentProcessor ----> stable source and chunk identity
+    |
+    v
+VectorStoreManager ---> Chroma synchronization and semantic search
+    |                              |
+    |                              +--> optional BM25 hybrid ranking
+    v
+QABot -------------> grounding gate -> prompt -> Ollama/OpenAI
+    |
+    +--> answer, context summary, and source metadata
 ```
 
----
+Key modules:
 
-## Quick Start
+- `config.py`: validated environment configuration.
+- `document_loader.py`: loading, metadata, hashing, and chunking.
+- `vectorstore.py`: persistent Chroma synchronization and retrieval.
+- `advanced_rag.py`: hybrid retrieval, query expansion, and HyDE.
+- `qa_chain.py`: retrieval orchestration, grounding, and generation.
+- `main.py`: local interactive CLI.
+- `run_tests.py`: manual provider-backed evaluation, not the automated test suite.
+- `tests/`: deterministic unit tests.
 
-```bash
-# 1. Clone and setup
-git clone (https://github.com/Eng-Domz-Machine-Learning/QA_RAG_BOT)
-cd claude_proj_1
-python -m venv venv
-venv\Scripts\activate  # Windows
-source venv/bin/activate  # Mac/Linux
+## Requirements
 
-# 2. Install dependencies
-pip install -r requirements.txt
+- Python 3.11.
+- Git.
+- For local generation: [Ollama](https://ollama.com/) and the configured model.
+- For hosted generation: an OpenAI API key.
 
-# 3. Configure (Ollama - no API key needed)
-# Edit .env with your preferred settings
+Python 3.14 is not supported by the pinned LangChain/Chroma generation used by
+this release.
 
-# 4. Add documents to ./documents folder
+## Quick start with Ollama
 
-# 5. Run
-python main.py
-```
+```powershell
+git clone https://github.com/Eng-Domz/QA_RAG_BOT.git
+cd QA_RAG_BOT
 
----
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 
-## Installation
-
-### Prerequisites
-
-- Python 3.9 or higher
-- pip package manager
-- Git (for cloning)
-
-### Step 1: Clone Repository
-
-```bash
-git clone (https://github.com/Eng-Domz-Machine-Learning/QA_RAG_BOT)
-cd claude_proj_1
-```
-
-### Step 2: Create Virtual Environment
-
-```bash
-# Windows
-python -m venv venv
-venv\Scripts\activate
-
-# Mac/Linux
-python3 -m venv venv
-source venv/bin/activate
-```
-
-### Step 3: Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### Step 4: Optional - Setup Ollama (Free Local LLM)
-
-```bash
-# Download from https://ollama.ai
-# Then pull a model:
+Copy-Item .env.example .env
 ollama pull llama3.2:1b
-```
-
-### Step 5: Verify Installation
-
-```bash
 python setup.py
-```
-
----
-
-## Configuration
-
-Edit `.env` and customize values for your setup.
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LLM_PROVIDER` | `ollama` | `openai` or `ollama` |
-| `OPENAI_API_KEY` | - | Your OpenAI API key (required if using OpenAI) |
-| `LLM_MODEL` | `gpt-3.5-turbo` | OpenAI model name |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
-| `OLLAMA_MODEL` | `llama3.2:1b` | Ollama model name |
-| `LLM_TEMPERATURE` | `0.3` | 0.0 (factual) to 1.0 (creative) |
-| `EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | HuggingFace embedding model |
-| `USE_GPU` | `false` | Enable GPU acceleration |
-| `GPU_DEVICE` | `directml` | `cuda`, `directml`, `xpu`, or `mps` |
-| `CHUNK_SIZE` | `1000` | Characters per chunk |
-| `CHUNK_OVERLAP` | `200` | Overlap between chunks |
-| `TOP_K` | `5` | Number of documents to retrieve |
-| `SIMILARITY_THRESHOLD` | `0.3` | Minimum relevance score to keep a chunk |
-| `RETRIEVAL_MODE` | `standard` | `standard` or `hybrid` retrieval |
-| `HYBRID_WEIGHTS` | `0.5,0.5` | Weights for semantic and BM25 retrievers |
-| `ENABLE_QUERY_EXPANSION` | `false` | Enable multi-query expansion |
-| `ENABLE_HYDE` | `false` | Enable HyDE hypothetical query generation |
-| `MAX_QUERY_VARIANTS` | `4` | Maximum query variants used per question |
-| `STRICT_GROUNDING` | `false` | If true, answer only from retrieved context |
-| `FALLBACK_TO_TOP_K_IF_BELOW_THRESHOLD` | `true` | Return top-k if threshold filtered all results |
-
----
-
-## Usage
-
-### Interactive Mode
-
-```bash
-python main.py
-```
-
-**Commands:**
-- Ask natural language questions
-- `/quit` or `/q` - Exit
-- `/debug` - Show retrieved documents with scores
-- `/sources` - Toggle source display
-
-### Rebuild Vector Store
-
-```bash
 python main.py --rebuild
 ```
 
-### Programmatic Usage
+On macOS or Linux, activate the environment with:
 
-```python
-from document_loader import DocumentProcessor
-from vectorstore import VectorStoreManager
-from qa_chain import QABot
-
-# Process documents
-processor = DocumentProcessor()
-docs = processor.process("./documents")
-
-# Create vector store
-store = VectorStoreManager()
-store.create_or_load(docs)
-
-# Initialize bot
-bot = QABot(store, use_openai=False, use_ollama=True)
-bot.initialize_chain()
-
-# Ask questions
-result = bot.ask("What is deep learning?")
-print(result["answer"])
-print(f"Sources: {result['sources']}")
+```bash
+source .venv/bin/activate
 ```
 
-### Batch Processing
+Add your own supported files below `documents/` before rebuilding the index.
 
-```python
-from batch_processor import BatchProcessor
+## Configuration
 
-questions = [
-    "What is machine learning?",
-    "How does backpropagation work?",
-    "What are transformers?",
-]
+Copy `.env.example` to `.env`. Configuration is validated at startup; invalid
+booleans, ranges, modes, weights, or chunk settings fail with a clear message.
 
-batch = BatchProcessor(bot)
-results = batch.process_questions(questions, save_path="results.json")
+Important settings:
+
+| Variable | Default | Purpose |
+|---|---:|---|
+| `LLM_PROVIDER` | `ollama` | `ollama` or `openai` |
+| `OLLAMA_MODEL` | `llama3.2:1b` | Local generation model |
+| `LLM_MODEL` | `gpt-4o-mini` | Hosted OpenAI model |
+| `LLM_TEMPERATURE` | `0.3` | Generation temperature from 0 to 2 |
+| `MAX_TOKENS` | `1000` | Maximum hosted-model output tokens |
+| `EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Embedding model |
+| `CHUNK_SIZE` | `1000` | Characters per chunk |
+| `CHUNK_OVERLAP` | `200` | Overlap; must be smaller than chunk size |
+| `TOP_K` | `5` | Maximum retrieved chunks |
+| `SIMILARITY_THRESHOLD` | `0.3` | Minimum semantic relevance in the 0–1 range |
+| `RETRIEVAL_MODE` | `standard` | `standard` or `hybrid` |
+| `STRICT_GROUNDING` | `false` | Refuse when semantic evidence is insufficient |
+| `FALLBACK_TO_TOP_K_IF_BELOW_THRESHOLD` | `true` | Allow weak context outside strict mode |
+
+The complete documented configuration lives in `.env.example`.
+
+## Privacy and provider choice
+
+Ollama runs generation locally, so document context stays on the machine unless
+another component is configured to transmit it.
+
+When `LLM_PROVIDER=openai`, the question and retrieved document excerpts are
+sent to OpenAI for generation. Do not use hosted generation for private,
+regulated, employer-owned, or confidential documents without authorization and
+an appropriate data-handling agreement.
+
+## Index lifecycle
+
+Each source records a normalized relative path and SHA-256 content hash. Each
+chunk receives a deterministic ID. On startup the index is synchronized:
+
+- unchanged sources are skipped;
+- changed sources replace their old chunks;
+- new sources are added;
+- sources removed from `documents/` are removed from the index.
+
+If every source has intentionally been removed, clear the remaining persisted
+chunks without starting the QA session:
+
+```powershell
+python main.py --sync-empty
 ```
 
----
+The stable metadata schema differs from older releases. Run this once after
+upgrading:
 
-## Project Structure
-
-```
-claude_proj_1/
-├── config.py              # Centralized configuration
-├── document_loader.py     # Document loading and chunking
-├── vectorstore.py         # ChromaDB vector store management
-├── qa_chain.py            # RAG chain and LLM integration
-├── advanced_rag.py        # Hybrid search, query expansion, HyDE
-├── batch_processor.py     # Batch question processing
-├── main.py                # Entry point and CLI
-├── setup.py               # Setup validation script
-├── requirements.txt       # Python dependencies
-├── .env                   # Environment configuration
-├── .env                   # Environment configuration
-├── documents/             # Place your documents here
-│   ├── sample_document.txt
-│   └── deep_learning_lecture.txt
-├── chroma_db/             # Vector store (auto-created)
-└── Explanation/           # Detailed documentation
+```powershell
+python main.py --rebuild
 ```
 
----
+Rebuilding removes only the generated collection below `chroma_db/`; original
+documents are not modified.
 
-## How It Works
+## Retrieval and grounding
 
-### 1. Document Ingestion
+Standard mode uses semantic similarity. Hybrid mode combines semantic search
+with BM25 keyword search and requires `rank-bm25`, which is included in
+`requirements.txt`.
 
-Documents are loaded from the `./documents` folder and processed:
-- **Load**: PDF, TXT, MD, DOCX files
-- **Split**: Recursive character splitting with semantic boundaries
-- **Embed**: Convert to vectors using HuggingFace models
-- **Store**: Save in ChromaDB with metadata
-
-### 2. Retrieval
-
-When you ask a question:
-1. Question is embedded using the same model
-2. Similar documents are found via cosine similarity
-3. Top-K results are returned (filtered by threshold)
-
-### 3. Answer Generation
-
-The retrieved context + question are sent to the LLM:
-```
-Context: [retrieved document chunks]
-Question: [user question]
-Answer: [LLM generates response based on context]
-```
-
-### 4. RAG Prompt Template
-
-```
-You are a helpful AI assistant answering questions based on the provided context.
-
-Instructions:
-1. Use the context below as your PRIMARY source of information
-2. Answer based on the context when possible
-3. If context doesn't have enough info, say so but still try to help
-4. Be concise, specific, and practical
-5. Mention the source file when answering from context
-
-Context: {context}
-Question: {question}
-Answer:
-```
-
----
-
-## Advanced Features
-
-### Hybrid Search (BM25 + Semantic)
-
-Combine keyword matching with semantic understanding:
-
-```python
-from advanced_rag import AdvancedRetriever
-
-retriever = AdvancedRetriever(vectorstore_manager)
-retriever.setup_hybrid_search(weights=[0.5, 0.5])  # [semantic, bm25]
-docs = retriever.retrieve("your query", method="hybrid")
-```
-
-**Best for:** Technical terms, product codes, exact match requirements
-
-**Live integration:** Set `RETRIEVAL_MODE=hybrid` in `.env` to use hybrid retrieval in `QABot.ask()`.
-
-### Query Expansion
-
-Generate multiple query variants for better coverage:
-
-```python
-from advanced_rag import QueryExpansion
-
-variants = QueryExpansion.generate_variants("what is ML?", llm)
-# Returns: ["what is ML?", "define machine learning", "explain ML"]
-```
-
-**Best for:** Vocabulary mismatch, improving recall
-
-**Live integration:** Set `ENABLE_QUERY_EXPANSION=true` to automatically expand each user question into multiple query variants before retrieval.
-
-### HyDE (Hypothetical Document Embeddings)
-
-Generate a hypothetical answer, then search for similar content:
-
-```python
-hypothetical = QueryExpansion.hyde_generate("what is overfitting?", llm)
-# Generates: "Overfitting occurs when a model learns training data too well..."
-# Then searches for documents similar to this hypothetical answer
-```
-
-**Best for:** Questions structurally different from document content
-
-**Live integration:** Set `ENABLE_HYDE=true` to include a HyDE-generated hypothetical passage as an additional retrieval query.
-
-### Strict Grounding
-
-To reduce hallucinations, force the assistant to answer only from retrieved context:
+Strict mode refuses when no semantic result meets the configured threshold:
 
 ```env
 STRICT_GROUNDING=true
@@ -358,133 +161,91 @@ SIMILARITY_THRESHOLD=0.35
 FALLBACK_TO_TOP_K_IF_BELOW_THRESHOLD=false
 ```
 
----
+Hybrid rankings do not pretend that BM25 and vector scores share one scale.
+Instead, strict hybrid mode requires a semantic relevance gate before accepting
+the hybrid ranking.
 
-## GPU Acceleration
+## Interactive usage
 
-### NVIDIA GPUs (CUDA)
-
-```bash
-pip install torch --index-url https://download.pytorch.org/whl/cu118
+```powershell
+python main.py
 ```
+
+Commands:
+
+- `/sources`: toggle source paths.
+- `/debug`: inspect semantic retrieval scores.
+- `/quit`: exit.
+
+Use `--rebuild` only when you intentionally want a clean index.
+
+## Automated tests
+
+The automated suite mocks external providers and storage boundaries. It does
+not require Ollama, API credentials, or an embedding-model download.
+
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m pip check
+python -m compileall -q .
+python -m pytest -q
+```
+
+CI runs these commands on Python 3.11 for pushes to `main` and pull requests.
+
+## Manual evaluation
+
+`run_tests.py` is a provider-backed manual evaluation command, despite its
+historical name. It rebuilds the local index, sends the questions in
+`test_questions.txt` to Ollama, and writes successes and failures separately.
+It exits non-zero if any question fails.
+
+```powershell
+python run_tests.py --output test_results.local.json
+python run_tests.py --rate --output test_results.rated.local.json
+```
+
+Manual ratings are not a reproducible quality metric. The roadmap includes a
+bilingual dataset with retrieval hit rate, citation correctness, grounded
+refusal, latency, and cost measurements.
+
+## GPU configuration
+
+CPU is the verified default. GPU support depends on a compatible PyTorch build:
 
 ```env
 USE_GPU=true
 GPU_DEVICE=cuda
 ```
 
-### Intel GPUs (DirectML - Windows)
+Windows DirectML and Apple MPS may be selected with `directml` and `mps`.
+Hardware-specific installations are intentionally not forced by the base
+requirements.
 
-```bash
-pip install torch-directml
-```
+## Current limitations
 
-```env
-USE_GPU=true
-GPU_DEVICE=directml
-DIRECTML_ADAPTER_PREFERENCE=intel
-```
+- Local CLI only; no web API, multi-user authentication, or hosted deployment.
+- No production rate limiting, audit log, monitoring, or service health check.
+- The checked-in question file is a manual study set, not a measured bilingual benchmark.
+- Provider-backed end-to-end evaluation requires a separately installed model or API access.
+- The dependency generation is deliberately pinned for reproducibility and should
+  be upgraded in a separate compatibility change.
+- Strict grounding reduces unsupported answers but does not prove factual correctness.
 
-### Mac GPUsMPS
+## Roadmap
 
-```env
-USE_GPU=true
-GPU_DEVICE=mps
-```
-
----
-
-## Testing & Evaluation
-
-### Run Test Questions
-
-```bash
-# Load questions from file
-python -c "
-from main import ingest_documents, QABot
-from batch_processor import BatchProcessor
-
-store = ingest_documents()
-bot = QABot(store, use_ollama=True)
-bot.initialize_chain()
-
-with open('test_questions.txt') as f:
-    questions = [l.strip() for l in f if l.strip() and not l.startswith('#')]
-
-batch = BatchProcessor(bot)
-results = batch.process_questions(questions, save_path='test_results.json')
-"
-```
-
-### Evaluation Metrics
-
-Rate outputs on:
-1. **Relevance** - Does the answer address the question?
-2. **Accuracy** - Is the information correct?
-3. **Completeness** - Does it cover all aspects?
-4. **Source Quality** - Are retrieved documents relevant?
-
----
-
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| `No module named X` | Run `pip install -r requirements.txt` |
-| `API key error` | Set `OPENAI_API_KEY` or use Ollama |
-| `No documents found` | Add files to `documents/` folder |
-| `Ollama connection failed` | Ensure Ollama is running: `ollama serve` |
-| Wrong/hallucinated answers | Check retrieved docs with `/debug`, adjust `TOP_K` or `CHUNK_SIZE` |
-| Slow responses | Use smaller model, reduce `TOP_K`, enable GPU |
-| GPU not working | Verify PyTorch installation: `python -c "import torch; print(torch.cuda.is_available())"` |
-
----
-
-## Best Practices
-
-### Chunking Strategy
-- **500-800 chars** for specific facts/QA
-- **1000-1500 chars** for general understanding
-- **20% overlap** preserves context across boundaries
-
-### Embedding Models
-| Model | Use Case |
-|-------|----------|
-| `all-MiniLM-L6-v2` | Fast, good quality (default) |
-| `all-mpnet-base-v2` | Better quality, slower |
-| `multi-qa-mpnet-base-dot-v1` | Optimized for QA tasks |
-
-### Retrieval Tuning
-- Start with `TOP_K=5`
-- Increase for complex questions
-- Adjust `SIMILARITY_THRESHOLD` based on results
-
-### Prompt Engineering
-- Be specific in questions
-- Include context hints
-- Use domain-specific terminology
-
----
+1. Publish a reproducible Arabic/English retrieval and grounding baseline.
+2. Add a backend API with validation, health endpoints, and structured logging.
+3. Add PostgreSQL/pgvector document and conversation persistence.
+4. Build an accessible bilingual web interface with RTL/LTR support.
+5. Add deployment, observability, security review, and operational documentation.
 
 ## License
 
-MIT License - Free to use and modify.
+Licensed under the [MIT License](LICENSE).
 
----
+## Author
 
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests
-5. Submit a pull request
-
----
-
-## Acknowledgments
-
-- [LangChain](https://python.langchain.com/) - RAG orchestration framework
-- [ChromaDB](https://docs.trychroma.com/) - Vector database
-- [HuggingFace](https://huggingface.co/) - Embedding models
-- [Ollama](https://ollama.ai/) - Local LLM runtime
+Built by [Adham Ahmed](https://github.com/Eng-Domz) as an independent project
+for learning from lecture materials and developing practical RAG engineering
+skills.

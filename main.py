@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
 
-from config import DOCUMENTS_DIR, USE_GPU, GPU_DEVICE
+from config import DOCUMENTS_DIR, USE_GPU, GPU_DEVICE, LLM_PROVIDER
 from document_loader import DocumentProcessor
 from vectorstore import VectorStoreManager
 from qa_chain import QABot
@@ -19,7 +19,30 @@ def _has_real_openai_key() -> bool:
     return value.lower() not in invalid_values
 
 
-def ingest_documents(force_rebuild: bool = False):
+def _configure_console_output() -> None:
+    """Keep CLI output printable in Windows consoles and redirected streams."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure:
+            reconfigure(encoding="utf-8", errors="replace")
+
+
+def _provider_flags(provider: str, has_openai_key: bool) -> tuple[bool, bool]:
+    """Resolve provider flags without silently changing an explicit choice."""
+    if provider == "openai":
+        if not has_openai_key:
+            raise ValueError(
+                "LLM_PROVIDER=openai requires a non-placeholder OPENAI_API_KEY"
+            )
+        return True, False
+    if provider == "ollama":
+        return False, True
+    raise ValueError(f"Unsupported LLM provider: {provider}")
+
+
+def ingest_documents(
+    force_rebuild: bool = False, allow_empty_sync: bool = False
+):
     """
     Process documents and create the vector store.
 
@@ -37,6 +60,13 @@ def ingest_documents(force_rebuild: bool = False):
     # List documents
     files = [f for f in Path(DOCUMENTS_DIR).rglob("*") if f.is_file()]
     if not files:
+        if allow_empty_sync:
+            if force_rebuild:
+                raise ValueError("--rebuild and --sync-empty cannot be used together")
+            print("No documents found; synchronizing the persisted index to empty.")
+            store = VectorStoreManager(use_gpu=USE_GPU, gpu_device=GPU_DEVICE)
+            store.create_or_load([], force_rebuild=False)
+            return store
         print(f"No documents found in {DOCUMENTS_DIR}")
         print("Please add documents and try again.")
         return None
@@ -68,7 +98,7 @@ def interactive_mode(bot: QABot):
     Run interactive question-answering session.
     """
     print("\n" + "="*60)
-    print("🤖 QA Bot is ready!")
+    print("QA Bot is ready!")
     print("="*60)
     print("Commands:")
     print("  /quit or /q  - Exit")
@@ -80,13 +110,13 @@ def interactive_mode(bot: QABot):
 
     while True:
         try:
-            question = input("\n❓ Question: ").strip()
+            question = input("\nQuestion: ").strip()
 
             if not question:
                 continue
 
             if question.lower() in ["/quit", "/q", "exit", "quit"]:
-                print("Goodbye! 👋")
+                print("Goodbye!")
                 break
 
             if question.lower() == "/debug":
@@ -100,74 +130,81 @@ def interactive_mode(bot: QABot):
                 continue
 
             # Get answer
-            print("\n🤔 Thinking...")
+            print("\nThinking...")
             result = bot.ask(question)
 
-            print(f"\n✅ Answer: {result['answer']}")
-            print(f"\n📊 {result.get('context_info', '')}")
+            print(f"\nAnswer: {result['answer']}")
+            print(f"\nContext: {result.get('context_info', '')}")
 
             if show_sources:
-                print(f"\n📚 Sources:")
+                print("\nSources:")
                 for i, source in enumerate(result['sources'], 1):
-                    print(f"   {i}. {source['metadata'].get('source_file', 'Unknown')}")
+                    metadata = source["metadata"]
+                    print(
+                        f"   {i}. "
+                        f"{metadata.get('source_path', metadata.get('source_file', 'Unknown'))}"
+                    )
 
         except KeyboardInterrupt:
-            print("\n\nGoodbye! 👋")
+            print("\n\nGoodbye!")
             break
         except Exception as e:
-            print(f"\n❌ Error: {e}")
+            print(f"\nError: {e}")
 
 
-def main():
+def main() -> int:
     """
     Main function to run the QA Bot.
     """
-    print("📚 Document QA Bot")
+    _configure_console_output()
+    print("Document QA Bot")
     print("="*60)
 
     # Check arguments
     force_rebuild = "--rebuild" in sys.argv
+    allow_empty_sync = "--sync-empty" in sys.argv
 
     # Step 1: Ingest documents
-    print("\n📥 Step 1: Loading documents...")
-    store = ingest_documents(force_rebuild=force_rebuild)
+    print("\nStep 1: Loading documents...")
+    store = ingest_documents(
+        force_rebuild=force_rebuild, allow_empty_sync=allow_empty_sync
+    )
 
     if store is None:
-        print("\n⚠️  Please add documents and restart.")
+        print("\nPlease add documents and restart.")
         print(f"   Documents folder: {DOCUMENTS_DIR}")
-        return
+        return 1
+
+    if store.get_collection_stats().get("document_count", 0) == 0:
+        print("Persisted index is now empty. Add documents before asking questions.")
+        return 0
 
     # Step 2: Initialize QA Chain
-    print("\n🤖 Step 2: Initializing QA chain...")
+    print("\nStep 2: Initializing QA chain...")
 
     # Determine which LLM to use.
     # Default is Ollama (free/local). Use OpenAI only when explicitly selected.
-    llm_provider = (os.environ.get("LLM_PROVIDER") or "ollama").strip().lower()
+    llm_provider = LLM_PROVIDER
     has_openai_key = _has_real_openai_key()
 
-    if llm_provider == "openai":
-        use_openai = has_openai_key
-        use_ollama = not use_openai
-    else:
-        use_openai = False
-        use_ollama = True
-
     try:
+        use_openai, use_ollama = _provider_flags(llm_provider, has_openai_key)
         bot = QABot(store, use_openai=use_openai, use_ollama=use_ollama)
         bot.initialize_chain()
     except Exception as e:
-        print(f"\n❌ Failed to initialize LLM: {e}")
+        print(f"\nFailed to initialize LLM: {e}")
         print("\nOptions:")
         print("  1. (PAID) Set OPENAI_API_KEY environment variable")
         print("  2. (FREE) Install Ollama:")
         print("     - Download from https://ollama.ai")
         print("     - Run: ollama pull llama3.2")
         print("     - Make sure Ollama is running in the background")
-        return
+        return 1
 
     # Step 3: Start interactive mode
     interactive_mode(bot)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

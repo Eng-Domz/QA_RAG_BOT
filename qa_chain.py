@@ -163,7 +163,12 @@ class QABot:
 
     @staticmethod
     def _doc_key(doc) -> Tuple[str, Any, str]:
-        source = doc.metadata.get("source_file", "unknown")
+        chunk_id = doc.metadata.get("chunk_id")
+        if chunk_id:
+            return (str(chunk_id), 0, "")
+        source = doc.metadata.get(
+            "source_path", doc.metadata.get("source_file", "unknown")
+        )
         chunk_index = doc.metadata.get("chunk_index", -1)
         content_head = doc.page_content[:120]
         return (source, chunk_index, content_head)
@@ -177,7 +182,22 @@ class QABot:
 
         for query in queries:
             if self.retrieval_mode == "hybrid" and self.advanced_retriever.ensemble_retriever:
+                if STRICT_GROUNDING:
+                    # BM25 and vector scores are not directly comparable. Require at
+                    # least one semantically relevant result before accepting the
+                    # hybrid ranking for a grounded answer.
+                    semantic_gate = self.vectorstore_manager.similarity_search(
+                        query,
+                        k=TOP_K,
+                        similarity_threshold=SIMILARITY_THRESHOLD,
+                        fallback_to_top_k=False,
+                    )
+                    if not semantic_gate:
+                        continue
                 docs = self.advanced_retriever.retrieve(query, method="hybrid")
+                if STRICT_GROUNDING:
+                    allowed_keys = {self._doc_key(doc) for doc in semantic_gate}
+                    docs = [doc for doc in docs if self._doc_key(doc) in allowed_keys]
             else:
                 docs = self.vectorstore_manager.similarity_search(
                     query,
@@ -249,13 +269,10 @@ class QABot:
                     for doc in retrieved_docs
                 ],
             }
-        except Exception as e:
-            return {
-                "question": question,
-                "answer": f"Error generating answer: {str(e)}",
-                "context_info": "Error retrieving documents",
-                "sources": [],
-            }
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to answer question {question!r}: {exc}"
+            ) from exc
 
     def debug_retrieval(self, question: str) -> None:
         """
@@ -270,6 +287,9 @@ class QABot:
 
         for i, (doc, score) in enumerate(results, 1):
             print(f"\n--- Result {i} (Score: {score:.4f}) ---")
-            print(f"Source: {doc.metadata.get('source_file', 'Unknown')}")
+            print(
+                "Source: "
+                f"{doc.metadata.get('source_path', doc.metadata.get('source_file', 'Unknown'))}"
+            )
             print(f"Content:\n{doc.page_content[:500]}...")
             print("-" * 60)
