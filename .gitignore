@@ -2,6 +2,7 @@
 .env
 .env.*
 env.sample
+!.env.example
 
 # Local vector DB / generated data
 chroma_db/
@@ -28,3 +29,4 @@ ENV/
 Thumbs.db
 .vscode/
 .idea/
+test_results*.json

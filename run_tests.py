@@ -1,140 +1,145 @@
-"""
-Test script for evaluating the RAG QA system.
-Run this to test the system with predefined questions and rate outputs.
+"""Provider-backed manual RAG evaluation.
 
-Usage:
-    python run_tests.py [--model llama3.2:1b] [--output results.json]
+This command is intentionally separate from the deterministic pytest suite. It
+requires a working Ollama model and exits non-zero when any question fails.
 """
-import os
-import sys
-import json
+
+from __future__ import annotations
+
 import argparse
-from datetime import datetime
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Iterable
 
 from document_loader import DocumentProcessor
-from vectorstore import VectorStoreManager
 from qa_chain import QABot
-from batch_processor import BatchProcessor
+from vectorstore import VectorStoreManager
 
 
-def load_questions(file_path="test_questions.txt"):
-    """Load questions from file, skipping comment lines."""
-    with open(file_path, "r", encoding="utf-8") as f:
-        questions = [
-            line.strip() for line in f
+def load_questions(file_path: str = "test_questions.txt") -> list[str]:
+    with open(file_path, "r", encoding="utf-8") as handle:
+        return [
+            line.strip()
+            for line in handle
             if line.strip() and not line.strip().startswith("#")
         ]
-    return questions
 
 
-def rate_answer(question, answer, sources):
-    """
-    Rate an answer on a scale of 1-5.
-    This is a placeholder for manual evaluation.
-    For automated evaluation, implement metrics like BLEU, ROUGE, or use an LLM judge.
-    """
-    print(f"\nRate this answer (1-5):")
+def rate_answer(question: str, answer: str, sources: list[dict]) -> int | None:
+    print("\nRate this answer (1-5):")
     print(f"  Q: {question}")
     print(f"  A: {answer[:200]}...")
     print(f"  Sources: {len(sources)} documents")
     while True:
+        rating = input("Rating (1-5, or 's' to skip): ").strip()
+        if rating.lower() == "s":
+            return None
         try:
-            rating = input("Rating (1-5, or 's' to skip): ").strip()
-            if rating.lower() == "s":
-                return None
-            rating = int(rating)
-            if 1 <= rating <= 5:
-                return rating
-            print("Please enter a number between 1 and 5")
+            parsed = int(rating)
         except ValueError:
             print("Invalid input. Please enter a number between 1 and 5")
+            continue
+        if 1 <= parsed <= 5:
+            return parsed
+        print("Please enter a number between 1 and 5")
 
 
-def run_tests(output_path="test_results.json", rate_interactively=False):
-    """Run all tests and save results."""
-    print("=" * 70)
-    print("RAG QA System Evaluation")
-    print("=" * 70)
+def evaluate_questions(
+    bot: QABot, questions: Iterable[str], *, rate_interactively: bool = False
+) -> tuple[list[dict], list[dict]]:
+    """Evaluate questions while keeping failures separate from valid answers."""
+    results: list[dict] = []
+    failures: list[dict] = []
+    for question in questions:
+        try:
+            result = bot.ask(question)
+            sources = result["sources"]
+            rating = (
+                rate_answer(question, result["answer"], sources)
+                if rate_interactively
+                else None
+            )
+            results.append(
+                {
+                    "status": "ok",
+                    "question": question,
+                    "answer": result["answer"],
+                    "sources": [
+                        source["metadata"].get(
+                            "source_path",
+                            source["metadata"].get("source_file", "Unknown"),
+                        )
+                        for source in sources
+                    ],
+                    "source_count": len(sources),
+                    "rating": rating,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+        except Exception as exc:
+            failures.append(
+                {
+                    "status": "error",
+                    "question": question,
+                    "error": str(exc),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+    return results, failures
 
-    # Load questions
+
+def run_evaluation(
+    output_path: str = "test_results.json", rate_interactively: bool = False
+) -> int:
     questions = load_questions()
-    print(f"\nLoaded {len(questions)} test questions")
+    print(f"Loaded {len(questions)} evaluation questions")
 
-    # Process documents
-    print("\n[1/3] Processing documents...")
     processor = DocumentProcessor()
-    docs = processor.process("./documents")
-    print(f"Processed {len(docs)} document chunks")
-
-    # Create vector store
-    print("\n[2/3] Creating vector store...")
+    documents = processor.process("./documents")
     store = VectorStoreManager(use_gpu=False)
-    store.create_or_load(docs, force_rebuild=True)
-    stats = store.get_collection_stats()
-    print(f"Vector store: {stats['document_count']} documents")
-
-    # Initialize bot
-    print("\n[3/3] Initializing QA bot...")
+    store.create_or_load(documents, force_rebuild=True)
     bot = QABot(store, use_openai=False, use_ollama=True)
     bot.initialize_chain()
 
-    # Run tests
-    print("\n" + "=" * 70)
-    print("Running Tests")
-    print("=" * 70)
+    results, failures = evaluate_questions(
+        bot, questions, rate_interactively=rate_interactively
+    )
+    payload = {
+        "summary": {
+            "total": len(questions),
+            "succeeded": len(results),
+            "failed": len(failures),
+        },
+        "results": results,
+        "failures": failures,
+    }
+    Path(output_path).write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    print(f"Results saved to {output_path}")
+    print(
+        f"Summary: {len(results)} succeeded, {len(failures)} failed, "
+        f"{len(questions)} total"
+    )
+    return 1 if failures else 0
 
-    results = []
-    batch = BatchProcessor(bot)
 
-    for i, question in enumerate(questions, 1):
-        print(f"\n[{i}/{len(questions)}] {question}")
-        result = bot.ask(question)
-
-        print(f"  Answer: {result['answer'][:150]}...")
-        print(f"  Sources: {len(result['sources'])} documents retrieved")
-
-        rating = None
-        if rate_interactively:
-            rating = rate_answer(question, result["answer"], result["sources"])
-
-        results.append({
-            "question": question,
-            "answer": result["answer"],
-            "sources": [s["metadata"].get("source_file", "Unknown") for s in result["sources"]],
-            "source_count": len(result["sources"]),
-            "rating": rating,
-            "timestamp": datetime.now().isoformat(),
-        })
-
-    # Save results
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2, ensure_ascii=False)
-    print(f"\nResults saved to {output_path}")
-
-    # Summary
-    print("\n" + "=" * 70)
-    print("Summary")
-    print("=" * 70)
-    rated = [r for r in results if r["rating"] is not None]
-    if rated:
-        avg_rating = sum(r["rating"] for r in rated) / len(rated)
-        print(f"Average rating: {avg_rating:.2f}/5 ({len(rated)} rated)")
-    print(f"Total questions: {len(results)}")
-    print(f"Questions with sources: {sum(1 for r in results if r['source_count'] > 0)}")
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Run provider-backed RAG evaluation")
+    parser.add_argument(
+        "--output", "-o", default="test_results.json", help="Output JSON path"
+    )
+    parser.add_argument(
+        "--rate", "-r", action="store_true", help="Rate answers interactively"
+    )
+    args = parser.parse_args()
+    try:
+        return run_evaluation(args.output, args.rate)
+    except Exception as exc:
+        print(f"Evaluation could not start: {exc}")
+        return 1
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Test RAG QA system")
-    parser.add_argument(
-        "--output", "-o",
-        default="test_results.json",
-        help="Output file path (default: test_results.json)"
-    )
-    parser.add_argument(
-        "--rate", "-r",
-        action="store_true",
-        help="Rate answers interactively"
-    )
-    args = parser.parse_args()
-
-    run_tests(output_path=args.output, rate_interactively=args.rate)
+    raise SystemExit(main())

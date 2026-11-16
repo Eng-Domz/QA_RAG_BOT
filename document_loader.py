@@ -2,7 +2,7 @@
 Document loading and processing module.
 Handles multiple file formats and preprocessing.
 """
-import os
+import hashlib
 from typing import List, Optional
 from pathlib import Path
 
@@ -12,6 +12,15 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from config import CHUNK_SIZE, CHUNK_OVERLAP
+
+
+def _sha256_file(path: Path, block_size: int = 1024 * 1024) -> str:
+    """Hash a file incrementally so large documents are not loaded into memory."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(block_size), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 class DocumentProcessor:
@@ -27,7 +36,9 @@ class DocumentProcessor:
             separators=["\n\n", "\n", ". ", " ", ""],
         )
 
-    def load_file(self, file_path: str) -> List[Document]:
+    def load_file(
+        self, file_path: str, source_root: Optional[str | Path] = None
+    ) -> List[Document]:
         """
         Load a single file based on its extension.
         Supports: .pdf, .txt, .md, .docx
@@ -38,6 +49,13 @@ class DocumentProcessor:
             raise FileNotFoundError(f"File not found: {file_path}")
 
         extension = path.suffix.lower()
+        root = Path(source_root).resolve() if source_root else path.parent.resolve()
+        resolved_path = path.resolve()
+        try:
+            source_path = resolved_path.relative_to(root).as_posix()
+        except ValueError:
+            source_path = path.name
+        source_hash = _sha256_file(resolved_path)
 
         try:
             if extension == ".pdf":
@@ -52,16 +70,17 @@ class DocumentProcessor:
 
             documents = loader.load()
 
-            # Add source metadata
+            # Keep a display name plus stable, unambiguous source identity.
             for doc in documents:
                 doc.metadata["source_file"] = path.name
+                doc.metadata["source_path"] = source_path
+                doc.metadata["source_hash"] = source_hash
                 doc.metadata["file_type"] = extension
 
             return documents
 
-        except Exception as e:
-            print(f"Error loading {file_path}: {e}")
-            return []
+        except Exception as exc:
+            raise RuntimeError(f"Failed to load {source_path}: {exc}") from exc
 
     def load_directory(self, directory: str) -> List[Document]:
         """
@@ -79,7 +98,7 @@ class DocumentProcessor:
         for file_path in path.rglob("*"):
             if file_path.is_file() and file_path.suffix.lower() in supported_extensions:
                 print(f"Loading: {file_path.name}")
-                docs = self.load_file(str(file_path))
+                docs = self.load_file(str(file_path), source_root=path)
                 documents.extend(docs)
 
         print(f"\nLoaded {len(documents)} document chunks from {directory}")
@@ -94,16 +113,19 @@ class DocumentProcessor:
 
         chunks = self.text_splitter.split_documents(documents)
 
-        # Add chunk index per document for traceability
-        current_doc_id = None
-        chunk_counter = 0
+        # Assign stable identity per source and source page.
+        chunk_counters: dict[tuple[str, int], int] = {}
         for chunk in chunks:
-            source = chunk.metadata.get("source_file", "unknown")
-            if source != current_doc_id:
-                current_doc_id = source
-                chunk_counter = 0
+            source = chunk.metadata.get("source_path", chunk.metadata.get("source_file", "unknown"))
+            source_hash = chunk.metadata.get("source_hash", "")
+            page = int(chunk.metadata.get("page", 0))
+            counter_key = (source, page)
+            chunk_counter = chunk_counters.get(counter_key, 0)
             chunk.metadata["chunk_index"] = chunk_counter
-            chunk_counter += 1
+            chunk.metadata["source_page"] = page
+            identity = f"{source}\0{source_hash}\0{page}\0{chunk_counter}\0{chunk.page_content}"
+            chunk.metadata["chunk_id"] = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+            chunk_counters[counter_key] = chunk_counter + 1
 
         print(f"Split into {len(chunks)} chunks")
         return chunks
@@ -116,7 +138,7 @@ class DocumentProcessor:
         path = Path(source)
 
         if path.is_file():
-            documents = self.load_file(source)
+            documents = self.load_file(source, source_root=path.parent)
         elif path.is_dir():
             documents = self.load_directory(source)
         else:

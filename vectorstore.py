@@ -4,6 +4,7 @@ Handles embeddings storage and retrieval with similarity search.
 """
 import os
 import shutil
+from collections import defaultdict
 from typing import List, Optional, Tuple
 
 from chromadb.config import Settings
@@ -98,43 +99,156 @@ class VectorStoreManager:
         force_rebuild: bool = False,
     ) -> Chroma:
         """
-        Create new vector store or load existing one.
-        If documents provided and store exists, adds to it unless force_rebuild=True.
+        Create or load the vector store and synchronize it with the current corpus.
         """
         persist_dir = self._persist_dir()
 
         if force_rebuild and os.path.exists(persist_dir):
             print(f"Force rebuild: removing persisted store at {persist_dir}")
-            shutil.rmtree(persist_dir, ignore_errors=True)
+            shutil.rmtree(persist_dir)
+            if os.path.exists(persist_dir):
+                raise RuntimeError(f"Failed to remove persisted store: {persist_dir}")
 
         os.makedirs(persist_dir, exist_ok=True)
         client_settings = Settings(anonymized_telemetry=False, is_persistent=True)
 
-        if os.path.exists(os.path.join(persist_dir, "chroma.sqlite3")):
+        store_exists = os.path.exists(os.path.join(persist_dir, "chroma.sqlite3"))
+        if store_exists:
             print(f"Loading existing vector store: {self.collection_name}")
-            self.vectorstore = Chroma(
-                collection_name=self.collection_name,
-                embedding_function=self.embeddings,
-                persist_directory=persist_dir,
-                client_settings=client_settings,
-            )
-            if documents:
-                print(f"Adding {len(documents)} new documents...")
-                self.vectorstore.add_documents(documents)
-        else:
-            if not documents:
-                raise ValueError("No documents provided and no existing vector store found")
-            print(f"Creating new vector store with {len(documents)} documents...")
-            self.vectorstore = Chroma.from_documents(
-                documents=documents,
-                embedding=self.embeddings,
-                collection_name=self.collection_name,
-                persist_directory=persist_dir,
-                client_settings=client_settings,
+        elif not documents:
+            raise ValueError("No documents provided and no existing vector store found")
+
+        self.vectorstore = Chroma(
+            collection_name=self.collection_name,
+            embedding_function=self.embeddings,
+            persist_directory=persist_dir,
+            client_settings=client_settings,
+        )
+        if documents is not None:
+            stats = self._synchronize_documents(documents)
+            print(
+                "Index synchronization: "
+                f"{stats['added']} added, {stats['removed']} removed, "
+                f"{stats['unchanged']} unchanged"
             )
 
         print("Vector store ready!")
         return self.vectorstore
+
+    def _synchronize_documents(self, documents: List[Document]) -> dict:
+        """Synchronize current chunks by stable source path, hash, and chunk ID."""
+        if not self.vectorstore:
+            raise RuntimeError("Vector store not initialized")
+
+        current_by_source: dict[str, List[Document]] = defaultdict(list)
+        for document in documents:
+            metadata = document.metadata
+            missing = {
+                key for key in ("source_path", "source_hash", "chunk_id") if not metadata.get(key)
+            }
+            if missing:
+                raise ValueError(
+                    "Document metadata is missing stable identity fields: "
+                    + ", ".join(sorted(missing))
+                )
+            current_by_source[str(metadata["source_path"])].append(document)
+
+        raw_existing = self.vectorstore._collection.get(include=["metadatas"])
+        existing_by_source: dict[str, List[tuple[str, dict]]] = defaultdict(list)
+        for existing_id, metadata in zip(
+            raw_existing.get("ids", []), raw_existing.get("metadatas", [])
+        ):
+            metadata = metadata or {}
+            source_path = str(metadata.get("source_path", ""))
+            existing_by_source[source_path].append((existing_id, metadata))
+
+        removed = 0
+        added = 0
+        unchanged = 0
+
+        # Old indexes without source_path and files removed from disk are stale.
+        for source_path in set(existing_by_source) - set(current_by_source):
+            ids = [item[0] for item in existing_by_source[source_path]]
+            if ids:
+                try:
+                    self.vectorstore.delete(ids=ids)
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"Failed to remove stale source {source_path!r}; "
+                        "the existing index was preserved"
+                    ) from exc
+                removed += len(ids)
+
+        for source_path, current_docs in current_by_source.items():
+            existing_items = existing_by_source.get(source_path, [])
+            existing_by_id = {item[0]: item[1] for item in existing_items}
+            current_by_id = {
+                str(doc.metadata["chunk_id"]): doc for doc in current_docs
+            }
+            existing_ids = set(existing_by_id)
+            current_ids = set(current_by_id)
+            existing_hashes = {
+                str(metadata.get("source_hash", "")) for _, metadata in existing_items
+            }
+            current_hashes = {str(doc.metadata["source_hash"]) for doc in current_docs}
+
+            if (
+                existing_items
+                and existing_ids == current_ids
+                and existing_hashes == current_hashes
+            ):
+                unchanged += len(current_docs)
+                continue
+
+            overlapping_ids = existing_ids & current_ids
+            conflicting_ids = {
+                chunk_id
+                for chunk_id in overlapping_ids
+                if str(existing_by_id[chunk_id].get("source_hash", ""))
+                != str(current_by_id[chunk_id].metadata["source_hash"])
+            }
+            if conflicting_ids:
+                raise RuntimeError(
+                    f"Stable chunk ID conflict for {source_path!r}; run with --rebuild"
+                )
+
+            new_ids = sorted(current_ids - existing_ids)
+            stale_ids = sorted(existing_ids - current_ids)
+            new_docs = [current_by_id[chunk_id] for chunk_id in new_ids]
+
+            # Stage disjoint replacement IDs before removing the old source. If
+            # embedding or persistence fails, rollback only the staged IDs and
+            # leave the previous indexed source available.
+            if new_ids:
+                try:
+                    self.vectorstore.add_documents(new_docs, ids=new_ids)
+                except Exception as exc:
+                    try:
+                        self.vectorstore.delete(ids=new_ids)
+                    except Exception as rollback_exc:
+                        raise RuntimeError(
+                            f"Failed to stage {source_path!r} and could not fully "
+                            "rollback staged chunks; the old chunks remain indexed"
+                        ) from rollback_exc
+                    raise RuntimeError(
+                        f"Failed to stage replacement for {source_path!r}; "
+                        "the old chunks remain indexed"
+                    ) from exc
+
+            if stale_ids:
+                try:
+                    self.vectorstore.delete(ids=stale_ids)
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"Replacement for {source_path!r} was staged, but stale "
+                        "chunk cleanup failed; new chunks remain indexed"
+                    ) from exc
+
+            added += len(new_ids)
+            removed += len(stale_ids)
+            unchanged += len(overlapping_ids)
+
+        return {"added": added, "removed": removed, "unchanged": unchanged}
 
     def similarity_search(
         self,
@@ -229,4 +343,4 @@ class VectorStoreManager:
 
         persist_dir = self._persist_dir()
         if os.path.exists(persist_dir):
-            shutil.rmtree(persist_dir, ignore_errors=True)
+            shutil.rmtree(persist_dir)
