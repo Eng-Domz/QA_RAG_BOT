@@ -9,6 +9,11 @@ The current release is a local command-line application being hardened toward
 a production-grade bilingual knowledge platform. See [Current limitations](#current-limitations)
 for the features it does not yet claim to provide.
 
+The planned platform is defined in the [product specification](docs/PRODUCT_SPEC.md)
+and [initial architecture](docs/ARCHITECTURE.md). These documents describe
+targets and future work; they do not imply that the current CLI already
+implements the web platform.
+
 ## What it demonstrates
 
 - Loading PDF, TXT, Markdown, and DOCX documents.
