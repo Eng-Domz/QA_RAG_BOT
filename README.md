@@ -14,6 +14,11 @@ and [initial architecture](docs/ARCHITECTURE.md). These documents describe
 targets and future work; they do not imply that the current CLI already
 implements the web platform.
 
+The first typed web-interface exercise lives in `web/`. Its purpose and the
+TypeScript/App Router concepts it demonstrates are documented in the
+[Next.js preparation notes](docs/NEXTJS_PREPARATION.md). Uploads, authentication,
+and backend integration are intentionally disabled in this preparation slice.
+
 ## What it demonstrates
 
 - Loading PDF, TXT, Markdown, and DOCX documents.
