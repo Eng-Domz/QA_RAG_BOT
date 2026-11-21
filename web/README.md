@@ -23,7 +23,7 @@ Open <http://localhost:3000>.
 ```powershell
 npm audit --audit-level=high
 npm run lint
-npx tsc --noEmit
+npm run typecheck
 npm run build
 ```
 

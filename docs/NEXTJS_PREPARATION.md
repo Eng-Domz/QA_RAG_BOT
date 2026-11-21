@@ -53,7 +53,7 @@ Run these from `web/`:
 
 ```powershell
 npm run lint
-npx tsc --noEmit
+npm run typecheck
 npm run build
 npm run dev
 ```
