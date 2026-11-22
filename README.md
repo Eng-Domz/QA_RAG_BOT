@@ -63,12 +63,45 @@ Key modules:
 ## Requirements
 
 - Python 3.11.
+- Node.js 22 and npm for the web interface.
 - Git.
 - For local generation: [Ollama](https://ollama.com/) and the configured model.
 - For hosted generation: an OpenAI API key.
 
 Python 3.14 is not supported by the pinned LangChain/Chroma generation used by
 this release.
+
+## Repository layout
+
+```text
+api/             Reserved FastAPI application boundary; no hosted API yet
+docs/            Product, architecture, and learning documentation
+infrastructure/  Future migrations and deployment assets
+scripts/         Windows bootstrap and full verification commands
+tests/           Deterministic tests for the existing Python RAG application
+web/             Typed Next.js interface prototype
+*.py             Existing verified local CLI and RAG modules
+```
+
+The root Python modules are intentionally not moved during scaffolding. Their
+behavior will be extracted behind API-facing interfaces incrementally so the
+working CLI and its tests remain available throughout the migration.
+
+## Full development setup
+
+On Windows, install both Python and frontend dependencies, create missing local
+environment files, and install the pre-commit hook with:
+
+```powershell
+.\scripts\bootstrap.ps1
+```
+
+The script copies templates only when `.env` or `web/.env.local` is missing; it
+does not overwrite existing local values. Values prefixed with `NEXT_PUBLIC_`
+are visible in the browser and must never contain secrets.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for manual macOS/Linux setup and the
+repository working agreements.
 
 ## Quick start with Ollama
 
@@ -202,6 +235,14 @@ python -m pytest -q
 ```
 
 CI runs these commands on Python 3.11 for pushes to `main` and pull requests.
+The web job also installs the locked npm dependency tree, audits dependencies,
+checks ESLint and TypeScript, and produces a Next.js production build.
+
+Windows contributors can run the complete Python and frontend release gate:
+
+```powershell
+.\scripts\verify.ps1
+```
 
 ## Manual evaluation
 
