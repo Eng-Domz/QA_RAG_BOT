@@ -33,6 +33,7 @@ $pythonTargets = @(
     Get-ChildItem -LiteralPath $repoRoot -Filter "*.py" -File |
         ForEach-Object { $_.FullName }
 ) + @(Join-Path $repoRoot "tests")
+$pythonTargets += @(Join-Path $repoRoot "api")
 
 Push-Location $repoRoot
 try {
