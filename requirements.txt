@@ -26,6 +26,10 @@ python-dotenv==1.0.1
 tiktoken==0.7.0
 pydantic==2.7.1
 
+# Web API
+fastapi==0.135.1
+uvicorn==0.54.0
+
 # ML dependencies (torch with CUDA support for GPU acceleration)
 # For NVIDIA GPU: pip install torch --index-url https://download.pytorch.org/whl/cu118
 # For CPU only (default): pip install torch

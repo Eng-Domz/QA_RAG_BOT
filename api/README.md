@@ -1,12 +1,19 @@
 # API boundary
 
-This directory is reserved for the production FastAPI application scheduled for
-Week 2. The existing root Python modules remain the verified local CLI until
-their domain behavior is extracted incrementally.
+This package contains the production FastAPI boundary. The first slice exposes
+operational endpoints without importing or initializing the existing RAG stack:
 
-The API implementation must not begin by copying the CLI into a second codebase.
-It will introduce validated settings, health/readiness/version endpoints, typed
-request and response schemas, and adapters around the existing document and RAG
-logic. See [`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md).
+- `GET /healthz` reports whether the API process is alive.
+- `GET /readyz` reports whether the current application dependencies are ready.
+- `GET /api/v1/version` exposes stable application and API version metadata.
+- `GET /docs` and `GET /openapi.json` expose generated API documentation.
 
-No hosted API behavior is claimed by this scaffold.
+Run the development server from the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn api.main:app --reload
+```
+
+The root Python modules remain the verified local CLI. Future API features will
+adapt those modules behind explicit services rather than copying the CLI into a
+second implementation. See [`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md).

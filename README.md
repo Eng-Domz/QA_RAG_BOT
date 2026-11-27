@@ -5,9 +5,11 @@ querying lecture materials with local or hosted language models. The project
 explores persistent vector search, source attribution, grounding controls,
 hybrid retrieval, query expansion, HyDE, and provider-backed evaluation.
 
-The current release is a local command-line application being hardened toward
-a production-grade bilingual knowledge platform. See [Current limitations](#current-limitations)
-for the features it does not yet claim to provide.
+The current release keeps the RAG workflow as a local command-line application
+and adds an operational FastAPI boundary while it is hardened toward a
+production-grade bilingual knowledge platform. See
+[Current limitations](#current-limitations) for the features it does not yet
+claim to provide.
 
 The planned platform is defined in the [product specification](docs/PRODUCT_SPEC.md)
 and [initial architecture](docs/ARCHITECTURE.md). These documents describe
@@ -74,7 +76,7 @@ this release.
 ## Repository layout
 
 ```text
-api/             Reserved FastAPI application boundary; no hosted API yet
+api/             FastAPI factory and operational endpoints
 docs/            Product, architecture, and learning documentation
 infrastructure/  Future migrations and deployment assets
 scripts/         Windows bootstrap and full verification commands
@@ -86,6 +88,25 @@ web/             Typed Next.js interface prototype
 The root Python modules are intentionally not moved during scaffolding. Their
 behavior will be extracted behind API-facing interfaces incrementally so the
 working CLI and its tests remain available throughout the migration.
+
+## Backend API
+
+Start the API locally after bootstrap:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn api.main:app --reload
+```
+
+The current API exposes only the operational foundation:
+
+- `GET /healthz`: process liveness.
+- `GET /readyz`: application and dependency readiness.
+- `GET /api/v1/version`: stable application and API version metadata.
+- `GET /docs`: interactive OpenAPI documentation.
+
+Importing the API does not initialize embeddings, Chroma, Ollama, OpenAI, or
+the document pipeline. Document ingestion and question-answering routes will be
+added behind explicit services in later milestones.
 
 ## Full development setup
 
@@ -275,8 +296,9 @@ requirements.
 
 ## Current limitations
 
-- Local CLI only; no web API, multi-user authentication, or hosted deployment.
-- No production rate limiting, audit log, monitoring, or service health check.
+- The API currently exposes operational endpoints only; document and question
+  routes, multi-user authentication, and hosted deployment are not implemented.
+- No production rate limiting, audit log, or external monitoring is implemented.
 - The checked-in question file is a manual study set, not a measured bilingual benchmark.
 - Provider-backed end-to-end evaluation requires a separately installed model or API access.
 - The dependency generation is deliberately pinned for reproducibility and should
@@ -286,7 +308,8 @@ requirements.
 ## Roadmap
 
 1. Publish a reproducible Arabic/English retrieval and grounding baseline.
-2. Add a backend API with validation, health endpoints, and structured logging.
+2. Extend the backend API with configuration validation, request IDs, and
+   structured logging.
 3. Add PostgreSQL/pgvector document and conversation persistence.
 4. Build an accessible bilingual web interface with RTL/LTR support.
 5. Add deployment, observability, security review, and operational documentation.
